@@ -1,0 +1,123 @@
+0 verbose cli C:\Program Files\nodejs\node.exe C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js
+1 info using npm@11.6.1
+2 info using node@v24.11.0
+3 silly config load:file:C:\Program Files\nodejs\node_modules\npm\npmrc
+4 silly config load:file:C:\Users\rachel jyothi\OneDrive\Desktop\Rupa folder lavish grand\.npmrc
+5 silly config load:file:C:\Users\rachel jyothi\.npmrc
+6 silly config load:file:C:\Users\rachel jyothi\AppData\Roaming\npm\etc\npmrc
+7 verbose title npm uninstall @lovable.dev/cloud-auth-js
+8 verbose argv "uninstall" "@lovable.dev/cloud-auth-js" "--package-lock-only"
+9 verbose logfile logs-max:10 dir:C:\Users\rachel jyothi\OneDrive\Desktop\Rupa folder lavish grand\.npm-cache\_logs\2026-06-22T18_41_55_822Z-
+10 verbose logfile C:\Users\rachel jyothi\OneDrive\Desktop\Rupa folder lavish grand\.npm-cache\_logs\2026-06-22T18_41_55_822Z-debug-0.log
+11 silly logfile done cleaning log files
+12 http fetch GET https://registry.npmjs.org/npm attempt 1 failed with ECONNREFUSED
+13 silly packumentCache heap:4496293888 maxSize:1124073472 maxEntrySize:562036736
+14 silly idealTree buildDeps
+15 silly fetch manifest @emnapi/core@^1.7.1
+16 silly packumentCache full:https://registry.npmjs.org/@emnapi%2fcore cache-miss
+17 silly fetch manifest @emnapi/runtime@^1.7.1
+18 silly packumentCache full:https://registry.npmjs.org/@emnapi%2fruntime cache-miss
+19 silly placeDep ROOT @emnapi/core@ OK for: @napi-rs/wasm-runtime@1.1.5 want: ^1.7.1
+20 warn ERESOLVE overriding peer dependency {
+20 warn ERESOLVE   code: 'ERESOLVE',
+20 warn ERESOLVE   edge: {
+20 warn ERESOLVE     type: 'peer',
+20 warn ERESOLVE     name: '@emnapi/core',
+20 warn ERESOLVE     spec: '^1.7.1',
+20 warn ERESOLVE     error: 'INVALID',
+20 warn ERESOLVE     from: {
+20 warn ERESOLVE       name: '@napi-rs/wasm-runtime',
+20 warn ERESOLVE       version: '1.1.5',
+20 warn ERESOLVE       location: 'node_modules/@napi-rs/wasm-runtime',
+20 warn ERESOLVE       isWorkspace: false,
+20 warn ERESOLVE       dependents: [Array]
+20 warn ERESOLVE     }
+20 warn ERESOLVE   },
+20 warn ERESOLVE   dep: {
+20 warn ERESOLVE     name: '@emnapi/core',
+20 warn ERESOLVE     version: undefined,
+20 warn ERESOLVE     errors: [ [NotCachedError] ],
+20 warn ERESOLVE     package: {},
+20 warn ERESOLVE     whileInstalling: {
+20 warn ERESOLVE       name: '@napi-rs/wasm-runtime',
+20 warn ERESOLVE       version: '1.1.5',
+20 warn ERESOLVE       path: 'C:\\Users\\rachel jyothi\\OneDrive\\Desktop\\Rupa folder lavish grand\\node_modules\\@napi-rs\\wasm-runtime'
+20 warn ERESOLVE     },
+20 warn ERESOLVE     location: 'node_modules/@emnapi/core',
+20 warn ERESOLVE     isWorkspace: false,
+20 warn ERESOLVE     dependents: [ [Object] ]
+20 warn ERESOLVE   },
+20 warn ERESOLVE   force: false,
+20 warn ERESOLVE   isMine: false,
+20 warn ERESOLVE   strictPeerDeps: false,
+20 warn ERESOLVE   current: {
+20 warn ERESOLVE     name: '@emnapi/core',
+20 warn ERESOLVE     version: undefined,
+20 warn ERESOLVE     errors: [ [NotCachedError] ],
+20 warn ERESOLVE     package: {},
+20 warn ERESOLVE     location: 'node_modules/@emnapi/core',
+20 warn ERESOLVE     isWorkspace: false,
+20 warn ERESOLVE     dependents: []
+20 warn ERESOLVE   }
+20 warn ERESOLVE }
+21 silly placeDep ROOT @emnapi/runtime@ OK for: @napi-rs/wasm-runtime@1.1.5 want: ^1.7.1
+22 warn ERESOLVE overriding peer dependency {
+22 warn ERESOLVE   code: 'ERESOLVE',
+22 warn ERESOLVE   edge: {
+22 warn ERESOLVE     type: 'peer',
+22 warn ERESOLVE     name: '@emnapi/runtime',
+22 warn ERESOLVE     spec: '^1.7.1',
+22 warn ERESOLVE     error: 'INVALID',
+22 warn ERESOLVE     from: {
+22 warn ERESOLVE       name: '@napi-rs/wasm-runtime',
+22 warn ERESOLVE       version: '1.1.5',
+22 warn ERESOLVE       location: 'node_modules/@napi-rs/wasm-runtime',
+22 warn ERESOLVE       isWorkspace: false,
+22 warn ERESOLVE       dependents: [Array]
+22 warn ERESOLVE     }
+22 warn ERESOLVE   },
+22 warn ERESOLVE   dep: {
+22 warn ERESOLVE     name: '@emnapi/runtime',
+22 warn ERESOLVE     version: undefined,
+22 warn ERESOLVE     errors: [ [NotCachedError] ],
+22 warn ERESOLVE     package: {},
+22 warn ERESOLVE     whileInstalling: {
+22 warn ERESOLVE       name: '@napi-rs/wasm-runtime',
+22 warn ERESOLVE       version: '1.1.5',
+22 warn ERESOLVE       path: 'C:\\Users\\rachel jyothi\\OneDrive\\Desktop\\Rupa folder lavish grand\\node_modules\\@napi-rs\\wasm-runtime'
+22 warn ERESOLVE     },
+22 warn ERESOLVE     location: 'node_modules/@emnapi/runtime',
+22 warn ERESOLVE     isWorkspace: false,
+22 warn ERESOLVE     dependents: [ [Object] ]
+22 warn ERESOLVE   },
+22 warn ERESOLVE   force: false,
+22 warn ERESOLVE   isMine: false,
+22 warn ERESOLVE   strictPeerDeps: false,
+22 warn ERESOLVE   current: {
+22 warn ERESOLVE     name: '@emnapi/runtime',
+22 warn ERESOLVE     version: undefined,
+22 warn ERESOLVE     errors: [ [NotCachedError] ],
+22 warn ERESOLVE     package: {},
+22 warn ERESOLVE     location: 'node_modules/@emnapi/runtime',
+22 warn ERESOLVE     isWorkspace: false,
+22 warn ERESOLVE     dependents: []
+22 warn ERESOLVE   }
+22 warn ERESOLVE }
+23 http cache https://registry.npmjs.org/@tailwindcss/oxide-wasm32-wasi/-/oxide-wasm32-wasi-4.3.1.tgz 1ms (cache hit)
+24 silly tarball no local data for https://registry.npmjs.org/@tailwindcss/oxide-wasm32-wasi/-/oxide-wasm32-wasi-4.3.1.tgz. Extracting by manifest.
+25 verbose stack Error: request to https://registry.npmjs.org/@tailwindcss/oxide-wasm32-wasi/-/oxide-wasm32-wasi-4.3.1.tgz failed: cache mode is 'only-if-cached' but no cached response is available.
+25 verbose stack     at cacheFetch (C:\Program Files\nodejs\node_modules\npm\node_modules\make-fetch-happen\lib\cache\index.js:12:13)
+25 verbose stack     at async fetch (C:\Program Files\nodejs\node_modules\npm\node_modules\make-fetch-happen\lib\fetch.js:98:7)
+26 error code ENOTCACHED
+27 error request to https://registry.npmjs.org/@tailwindcss/oxide-wasm32-wasi/-/oxide-wasm32-wasi-4.3.1.tgz failed: cache mode is 'only-if-cached' but no cached response is available.
+28 silly unfinished npm timer reify 1782153716429
+29 silly unfinished npm timer reify:loadTrees 1782153716429
+30 silly unfinished npm timer idealTree:buildDeps 1782153716820
+31 silly unfinished npm timer idealTree:node_modules/@tailwindcss/oxide-wasm32-wasi 1782153716859
+32 verbose cwd C:\Users\rachel jyothi\OneDrive\Desktop\Rupa folder lavish grand
+33 verbose os Windows_NT 10.0.26200
+34 verbose node v24.11.0
+35 verbose npm  v11.6.1
+36 verbose exit 1
+37 verbose code 1
+38 error A complete log of this run can be found in: C:\Users\rachel jyothi\OneDrive\Desktop\Rupa folder lavish grand\.npm-cache\_logs\2026-06-22T18_41_55_822Z-debug-0.log
