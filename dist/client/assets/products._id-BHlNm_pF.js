@@ -1,1 +1,0 @@
-import{E as e}from"./catalog-Cp8CxepD.js";import{t}from"./SiteLayout-Dh5ZQnAV.js";var n=e(),r=({error:e})=>(0,n.jsx)(t,{children:(0,n.jsx)(`div`,{className:`py-32 text-center text-destructive`,children:e.message})});export{r as errorComponent};
