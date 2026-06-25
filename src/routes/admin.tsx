@@ -1,12 +1,38 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { useAuth, useAuthModal, inr } from "@/lib/store";
 import { products } from "@/data/catalog";
-import { TrendingUp, ShoppingBag, Users, Package, AlertTriangle, BarChart3, ShieldAlert, ArrowUpRight } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { TrendingUp, ShoppingBag, Users, Package, AlertTriangle, BarChart3, ShieldAlert, ArrowUpRight, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
 type Tab = "overview" | "orders" | "inventory" | "customers" | "reports";
+type OrderStatus = "pending" | "confirmed" | "processing" | "shipped" | "delivered" | "cancelled" | "refunded";
+type AdminOrder = {
+  id: string;
+  order_number: string;
+  shipping_name: string;
+  shipping_phone: string;
+  shipping_city: string;
+  total_amount: number;
+  subtotal: number;
+  shipping_cost: number;
+  status: OrderStatus;
+  payment_method: string;
+  payment_status: string;
+  created_at: string;
+  items?: Array<{ id: string; item_name: string; quantity: number; total_price: number }>;
+};
 
 export const Route = createFileRoute("/admin")({
   validateSearch: (s): { tab: Tab } => ({ tab: (s.tab as Tab) || "overview" }),
@@ -14,18 +40,58 @@ export const Route = createFileRoute("/admin")({
   component: Admin,
 });
 
-const recentOrders = [
-  { id: "LG874621", customer: "Anitha R.", total: 2147, status: "Processing" },
-  { id: "LG874620", customer: "Rohit M.",  total: 3289, status: "Shipped" },
-  { id: "LG874619", customer: "Priya S.",  total: 1499, status: "Delivered" },
-  { id: "LG874618", customer: "Karthik V.",total: 8990, status: "Processing" },
-  { id: "LG874617", customer: "Anonymous", total: 642,  status: "Delivered" },
-];
+const orderStatuses: OrderStatus[] = ["pending", "confirmed", "processing", "shipped", "delivered", "cancelled", "refunded"];
+const statusLabels: Record<OrderStatus, string> = {
+  pending: "Pending",
+  confirmed: "Confirmed",
+  processing: "Processing",
+  shipped: "Shipped",
+  delivered: "Delivered",
+  cancelled: "Cancelled",
+  refunded: "Refunded",
+};
 
 function Admin() {
   const { tab } = Route.useSearch();
   const { user } = useAuth();
   const modal = useAuthModal();
+  const [orders, setOrders] = useState<AdminOrder[]>([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (user?.role !== "admin") return;
+
+    let cancelled = false;
+    async function loadOrders() {
+      setLoadingOrders(true);
+      const { data, error } = await supabase
+        .from("orders")
+        .select("*, items:order_items(id, item_name, quantity, total_price)")
+        .order("created_at", { ascending: false });
+
+      if (cancelled) return;
+      if (error) {
+        console.error("[Admin] Failed to load orders", error);
+        toast.error("Could not load orders");
+      } else {
+        setOrders((data ?? []) as AdminOrder[]);
+      }
+      setLoadingOrders(false);
+    }
+
+    loadOrders();
+
+    const channel = supabase
+      .channel("admin-orders")
+      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => loadOrders())
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+  }, [user?.role]);
 
   if (!user) return (
     <SiteLayout>
@@ -33,7 +99,9 @@ function Admin() {
         <ShieldAlert className="w-12 h-12 mx-auto text-brand" />
         <h1 className="font-display text-3xl font-bold text-brand-deep mt-4">Admin sign-in required</h1>
         <Button onClick={() => modal.trigger()} className="mt-6 bg-gradient-hero text-white">Sign In</Button>
-        <p className="text-xs text-muted-foreground mt-4">Demo: any email starting with <b>admin@</b></p>
+        <p className="text-xs text-muted-foreground mt-4">
+          Temporary admin: <b>lavanya.boga@lavishgrand.com</b>
+        </p>
       </section>
     </SiteLayout>
   );
@@ -50,6 +118,37 @@ function Admin() {
   );
 
   const lowStock = products.filter((p) => p.stock < 70);
+  const today = new Date().toDateString();
+  const ordersToday = orders.filter((order) => new Date(order.created_at).toDateString() === today).length;
+  const revenue = orders
+    .filter((order) => !["cancelled", "refunded"].includes(order.status))
+    .reduce((sum, order) => sum + Number(order.total_amount), 0);
+  const activeCustomers = useMemo(
+    () => new Set(orders.map((order) => `${order.shipping_phone}-${order.shipping_name}`)).size,
+    [orders],
+  );
+
+  async function updateOrderStatus(order: AdminOrder, status: OrderStatus) {
+    setUpdatingId(order.id);
+    const stamp =
+      status === "confirmed"
+        ? { confirmed_at: new Date().toISOString() }
+        : status === "shipped"
+          ? { shipped_at: new Date().toISOString() }
+          : status === "delivered"
+            ? { delivered_at: new Date().toISOString() }
+            : {};
+
+    const { error } = await supabase.from("orders").update({ status, ...stamp }).eq("id", order.id);
+    if (error) {
+      console.error("[Admin] Failed to update order", error);
+      toast.error("Could not update order status");
+    } else {
+      setOrders((current) => current.map((item) => (item.id === order.id ? { ...item, status } : item)));
+      toast.success(`Order ${order.order_number} marked ${statusLabels[status]}`);
+    }
+    setUpdatingId(null);
+  }
 
   return (
     <SiteLayout>
@@ -75,9 +174,9 @@ function Admin() {
           <TabsContent value="overview">
             <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
               {[
-                { l: "Revenue (MTD)", v: inr(384920), d: "+12.4%", i: TrendingUp },
-                { l: "Orders Today",  v: 47,            d: "+8 vs avg", i: ShoppingBag },
-                { l: "Active Customers", v: 1287,       d: "+24 this week", i: Users },
+                { l: "Revenue", v: inr(revenue), d: `${orders.length} orders`, i: TrendingUp },
+                { l: "Orders Today",  v: ordersToday,            d: "Live", i: ShoppingBag },
+                { l: "Active Customers", v: activeCustomers,       d: "From orders", i: Users },
                 { l: "Inventory SKUs",  v: products.length, d: `${lowStock.length} low`, i: Package },
               ].map((s) => (
                 <div key={s.l} className="bg-white border border-border rounded-2xl p-5 shadow-soft">
@@ -91,12 +190,14 @@ function Admin() {
               <div className="bg-white border border-border rounded-2xl p-6 shadow-soft">
                 <h3 className="font-display font-bold text-brand-deep mb-3">Recent Orders</h3>
                 <div className="space-y-2 text-sm">
-                  {recentOrders.map((o) => (
+                  {loadingOrders && <div className="py-6 text-muted-foreground flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading orders</div>}
+                  {!loadingOrders && orders.slice(0, 6).map((o) => (
                     <div key={o.id} className="flex items-center justify-between py-2 border-b last:border-b-0 border-border">
-                      <div><div className="font-mono text-brand">{o.id}</div><div className="text-xs text-muted-foreground">{o.customer}</div></div>
-                      <div className="text-right"><div className="font-bold">{inr(o.total)}</div><div className="text-xs text-muted-foreground">{o.status}</div></div>
+                      <div><div className="font-mono text-brand">{o.order_number}</div><div className="text-xs text-muted-foreground">{o.shipping_name}</div></div>
+                      <div className="text-right"><div className="font-bold">{inr(Number(o.total_amount))}</div><div className="text-xs text-muted-foreground">{statusLabels[o.status]}</div></div>
                     </div>
                   ))}
+                  {!loadingOrders && orders.length === 0 && <div className="py-6 text-muted-foreground">No orders yet.</div>}
                 </div>
               </div>
               <div className="bg-white border border-border rounded-2xl p-6 shadow-soft">
@@ -116,11 +217,35 @@ function Admin() {
           <TabsContent value="orders">
             <div className="bg-white border border-border rounded-2xl overflow-hidden">
               <table className="w-full text-sm">
-                <thead className="bg-secondary text-brand-deep"><tr>{["Order ID","Customer","Total","Status","Action"].map((h) => <th key={h} className="text-left p-4 font-semibold">{h}</th>)}</tr></thead>
+                <thead className="bg-secondary text-brand-deep"><tr>{["Order ID","Customer","Items","Total","Payment","Status"].map((h) => <th key={h} className="text-left p-4 font-semibold">{h}</th>)}</tr></thead>
                 <tbody className="[&_tr]:border-t [&_tr]:border-border">
-                  {recentOrders.map((o) => (
-                    <tr key={o.id}><td className="p-4 font-mono text-brand">{o.id}</td><td className="p-4">{o.customer}</td><td className="p-4 font-semibold">{inr(o.total)}</td><td className="p-4"><span className="text-xs px-2 py-1 rounded-full bg-secondary text-brand-deep font-semibold">{o.status}</span></td><td className="p-4"><button className="text-brand hover:underline">Manage</button></td></tr>
+                  {loadingOrders && (
+                    <tr><td colSpan={6} className="p-8 text-center text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mx-auto mb-2" />Loading orders</td></tr>
+                  )}
+                  {!loadingOrders && orders.map((o) => (
+                    <tr key={o.id}>
+                      <td className="p-4 font-mono text-brand">{o.order_number}<div className="text-xs text-muted-foreground font-sans">{new Date(o.created_at).toLocaleDateString("en-IN")}</div></td>
+                      <td className="p-4"><div className="font-semibold">{o.shipping_name}</div><div className="text-xs text-muted-foreground">{o.shipping_phone} · {o.shipping_city}</div></td>
+                      <td className="p-4 text-muted-foreground">{o.items?.reduce((sum, item) => sum + item.quantity, 0) ?? 0}</td>
+                      <td className="p-4 font-semibold">{inr(Number(o.total_amount))}<div className="text-xs text-muted-foreground">Delivery {o.shipping_cost ? inr(Number(o.shipping_cost)) : "Free"}</div></td>
+                      <td className="p-4 capitalize">{o.payment_method}<div className="text-xs text-muted-foreground">{o.payment_status}</div></td>
+                      <td className="p-4 min-w-44">
+                        <Select value={o.status} onValueChange={(value) => updateOrderStatus(o, value as OrderStatus)} disabled={updatingId === o.id}>
+                          <SelectTrigger className="h-9">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {orderStatuses.map((status) => (
+                              <SelectItem key={status} value={status}>{statusLabels[status]}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </td>
+                    </tr>
                   ))}
+                  {!loadingOrders && orders.length === 0 && (
+                    <tr><td colSpan={6} className="p-8 text-center text-muted-foreground">No orders yet.</td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -152,9 +277,9 @@ function Admin() {
           <TabsContent value="reports">
             <div className="grid md:grid-cols-3 gap-5">
               {[
-                { l: "Daily Sales", v: inr(12480), d: "Today" },
-                { l: "Monthly Sales", v: inr(384920), d: "June 2026" },
-                { l: "YoY Growth", v: "+42%", d: "vs Jun '25" },
+                { l: "Daily Sales", v: inr(orders.filter((order) => new Date(order.created_at).toDateString() === today).reduce((sum, order) => sum + Number(order.total_amount), 0)), d: "Today" },
+                { l: "Total Sales", v: inr(revenue), d: "All orders" },
+                { l: "Pending Orders", v: orders.filter((order) => ["pending", "confirmed", "processing"].includes(order.status)).length, d: "Need action" },
               ].map((s) => (
                 <div key={s.l} className="bg-white border border-border rounded-2xl p-6 shadow-soft">
                   <BarChart3 className="w-6 h-6 text-brand" />

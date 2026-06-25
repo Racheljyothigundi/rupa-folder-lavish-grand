@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
 import { inr, useAuth, useCart } from "@/lib/store";
+import { getDeliveryCharge, getFreeDeliveryShortfall } from "@/lib/shipping";
 import { Minus, Plus, ShoppingBag, Trash2 } from "lucide-react";
 
 export const Route = createFileRoute("/cart")({
@@ -11,7 +12,8 @@ export const Route = createFileRoute("/cart")({
 
 function Cart() {
   const cart = useCart(); const { requireAuth } = useAuth();
-  const ship = cart.subtotal > 999 ? 0 : cart.subtotal > 0 ? 79 : 0;
+  const ship = getDeliveryCharge(cart.subtotal);
+  const freeDeliveryShortfall = getFreeDeliveryShortfall(cart.subtotal);
   const total = cart.subtotal + ship;
   return (
     <SiteLayout>
@@ -50,7 +52,7 @@ function Cart() {
               <div className="mt-4 space-y-2 text-sm">
                 <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>{inr(cart.subtotal)}</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">Shipping</span><span>{ship === 0 ? "Free" : inr(ship)}</span></div>
-                {cart.subtotal < 999 && cart.subtotal > 0 && <div className="text-xs text-amber-700 bg-amber-50 rounded-lg p-2">Add {inr(999 - cart.subtotal)} more for free shipping</div>}
+                {freeDeliveryShortfall > 0 && <div className="text-xs text-amber-700 bg-amber-50 rounded-lg p-2">Add {inr(freeDeliveryShortfall)} more for free shipping</div>}
               </div>
               <div className="border-t border-border mt-4 pt-4 flex justify-between items-baseline">
                 <span className="text-muted-foreground">Total</span>

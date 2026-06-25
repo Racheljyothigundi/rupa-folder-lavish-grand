@@ -28,7 +28,9 @@ async function verifyPayment(
   );
 
   const signatureBytes = await crypto.subtle.sign("HMAC", key, msgData);
-  const expectedSignature = btoa(String.fromCharCode(...new Uint8Array(signatureBytes)));
+  const expectedSignature = Array.from(new Uint8Array(signatureBytes))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 
   return signature === expectedSignature;
 }

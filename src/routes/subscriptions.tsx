@@ -1,10 +1,13 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { SectionHeader } from "@/components/site/SectionHeader";
 import { Button } from "@/components/ui/button";
 import { subscriptionPlans } from "@/data/catalog";
-import { inr, useAuth, useCart } from "@/lib/store";
-import { BadgeCheck, Repeat, Truck, ShieldCheck } from "lucide-react";
+import { inr, useAuth } from "@/lib/store";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+import { BadgeCheck, Repeat, Truck, ShieldCheck, Loader2 } from "lucide-react";
 
 export const Route = createFileRoute("/subscriptions")({
   head: () => ({ meta: [{ title: "Monthly Dry Fruit Subscriptions — Lavish Grand Traders" }, { name: "description", content: "Subscribe and save on monthly dry fruit packs — Family, Fitness, Kids and Executive plans." }] }),
@@ -12,7 +15,35 @@ export const Route = createFileRoute("/subscriptions")({
 });
 
 function Subscriptions() {
-  const cart = useCart(); const { requireAuth } = useAuth();
+  const { user, requireAuth } = useAuth();
+  const nav = useNavigate();
+  const [savingPlanId, setSavingPlanId] = useState<string | null>(null);
+
+  async function subscribe(planId: string) {
+    if (!requireAuth() || !user) return;
+
+    setSavingPlanId(planId);
+    const nextBillingDate = new Date();
+    nextBillingDate.setMonth(nextBillingDate.getMonth() + 1);
+
+    const { error } = await supabase.from("user_subscriptions").insert({
+      user_id: user.id,
+      plan_id: planId,
+      status: "active",
+      next_billing_date: nextBillingDate.toISOString().slice(0, 10),
+    });
+
+    if (error) {
+      console.error("[Subscriptions] Failed to subscribe", error);
+      toast.error("Could not add subscription");
+    } else {
+      toast.success("Subscription added");
+      nav({ to: "/account", search: { tab: "subscriptions" } });
+    }
+
+    setSavingPlanId(null);
+  }
+
   return (
     <SiteLayout>
       <section className="bg-gradient-deep text-white py-16">
@@ -48,7 +79,20 @@ function Subscriptions() {
               <ul className="space-y-2 text-sm text-foreground/80">
                 {s.includes.map((i) => <li key={i} className="flex gap-2"><BadgeCheck className="w-4 h-4 text-brand shrink-0 mt-0.5" /> {i}</li>)}
               </ul>
-              <Button className="w-full mt-6 bg-gradient-hero text-white shadow-elegant" onClick={() => { if (!requireAuth()) return; cart.add({ id: s.id, name: s.name + " (Monthly)", image: "", qty: "Monthly Pack", price: s.monthly }); }}>Subscribe</Button>
+              <Button
+                className="w-full mt-6 bg-gradient-hero text-white shadow-elegant"
+                disabled={savingPlanId === s.id}
+                onClick={() => subscribe(s.id)}
+              >
+                {savingPlanId === s.id ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Adding...
+                  </>
+                ) : (
+                  "Subscribe"
+                )}
+              </Button>
             </div>
           ))}
         </div>

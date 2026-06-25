@@ -1,9 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { useAuth, useAuthModal, useWishlist, inr } from "@/lib/store";
 import { products, subscriptionPlans } from "@/data/catalog";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 import {
   LayoutDashboard,
   Package,
@@ -16,6 +19,23 @@ import {
 } from "lucide-react";
 
 type Tab = "dashboard" | "orders" | "subscriptions" | "wishlist" | "profile";
+type CustomerOrder = {
+  id: string;
+  order_number: string;
+  status: "pending" | "confirmed" | "processing" | "shipped" | "delivered" | "cancelled" | "refunded";
+  payment_status: string;
+  total_amount: number;
+  shipping_cost: number;
+  created_at: string;
+  items?: Array<{ id: string; item_name: string; quantity: number; total_price: number }>;
+};
+type CustomerSubscription = {
+  id: string;
+  plan_id: string;
+  status: string;
+  start_date: string;
+  next_billing_date: string;
+};
 
 export const Route = createFileRoute("/account")({
   validateSearch: (s): { tab: Tab } => ({ tab: (s.tab as Tab) || "dashboard" }),
@@ -23,17 +43,160 @@ export const Route = createFileRoute("/account")({
   component: Account,
 });
 
-const mockOrders = [
-  { id: "LG874512", date: "12 Jun 2026", items: 3, total: 2147, status: "Delivered" },
-  { id: "LG874488", date: "28 May 2026", items: 1, total: 642, status: "Delivered" },
-  { id: "LG874322", date: "10 May 2026", items: 5, total: 3289, status: "Delivered" },
-];
+const statusLabels: Record<CustomerOrder["status"], string> = {
+  pending: "Pending",
+  confirmed: "Confirmed",
+  processing: "Processing",
+  shipped: "Shipped",
+  delivered: "Delivered",
+  cancelled: "Cancelled",
+  refunded: "Refunded",
+};
+
+const statusTone: Record<CustomerOrder["status"], string> = {
+  pending: "bg-amber-100 text-amber-700",
+  confirmed: "bg-sky-100 text-sky-700",
+  processing: "bg-indigo-100 text-indigo-700",
+  shipped: "bg-cyan-100 text-cyan-700",
+  delivered: "bg-emerald-100 text-emerald-700",
+  cancelled: "bg-red-100 text-red-700",
+  refunded: "bg-slate-100 text-slate-700",
+};
 
 function Account() {
   const { tab } = Route.useSearch();
   const { user, logout, loading } = useAuth();
   const modal = useAuthModal();
   const wish = useWishlist();
+  const [orders, setOrders] = useState<CustomerOrder[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [subscriptions, setSubscriptions] = useState<CustomerSubscription[]>([]);
+  const [subscriptionsLoading, setSubscriptionsLoading] = useState(false);
+  const [subscriptionActionId, setSubscriptionActionId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+
+    let cancelled = false;
+    async function loadOrders() {
+      setOrdersLoading(true);
+      const { data, error } = await supabase
+        .from("orders")
+        .select("*, items:order_items(id, item_name, quantity, total_price)")
+        .order("created_at", { ascending: false });
+
+      if (cancelled) return;
+      if (error) {
+        console.error("[Account] Failed to load orders", error);
+      } else {
+        setOrders((data ?? []) as CustomerOrder[]);
+      }
+      setOrdersLoading(false);
+    }
+
+    loadOrders();
+
+    const channel = supabase
+      .channel(`customer-orders-${user.id}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "orders", filter: `user_id=eq.${user.id}` }, () => loadOrders())
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    let cancelled = false;
+    async function loadSubscriptions() {
+      setSubscriptionsLoading(true);
+      const { data, error } = await supabase
+        .from("user_subscriptions")
+        .select("id, plan_id, status, start_date, next_billing_date")
+        .order("created_at", { ascending: false });
+
+      if (cancelled) return;
+      if (error) {
+        console.error("[Account] Failed to load subscriptions", error);
+      } else {
+        setSubscriptions((data ?? []) as CustomerSubscription[]);
+      }
+      setSubscriptionsLoading(false);
+    }
+
+    loadSubscriptions();
+
+    const channel = supabase
+      .channel(`customer-subscriptions-${user.id}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "user_subscriptions", filter: `user_id=eq.${user.id}` }, () => loadSubscriptions())
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
+
+  async function updateSubscription(subscription: CustomerSubscription, patch: Partial<CustomerSubscription>, message: string) {
+    setSubscriptionActionId(subscription.id);
+    const { error } = await supabase
+      .from("user_subscriptions")
+      .update(patch)
+      .eq("id", subscription.id);
+
+    if (error) {
+      console.error("[Account] Failed to update subscription", error);
+      toast.error("Could not update subscription");
+    } else {
+      setSubscriptions((current) =>
+        current.map((item) => (item.id === subscription.id ? { ...item, ...patch } : item)),
+      );
+      toast.success(message);
+    }
+    setSubscriptionActionId(null);
+  }
+
+  async function skipNextDelivery(subscription: CustomerSubscription) {
+    const nextDate = new Date(subscription.next_billing_date);
+    nextDate.setMonth(nextDate.getMonth() + 1);
+    await updateSubscription(
+      subscription,
+      { next_billing_date: nextDate.toISOString().slice(0, 10) },
+      "Next delivery skipped",
+    );
+  }
+
+  async function pauseSubscription(subscription: CustomerSubscription) {
+    await updateSubscription(subscription, { status: "paused" }, "Subscription paused");
+  }
+
+  async function removeSubscription(subscription: CustomerSubscription) {
+    if (typeof window !== "undefined" && !window.confirm("Remove this subscription?")) return;
+
+    setSubscriptionActionId(subscription.id);
+    const { error } = await supabase
+      .from("user_subscriptions")
+      .delete()
+      .eq("id", subscription.id);
+
+    if (error) {
+      console.error("[Account] Failed to remove subscription", error);
+      toast.error("Could not remove subscription");
+    } else {
+      setSubscriptions((current) => current.filter((item) => item.id !== subscription.id));
+      toast.success("Subscription removed");
+    }
+    setSubscriptionActionId(null);
+  }
+
+  const wishItems = products.filter((p) => wish.has(p.id));
+  const orderItemCount = useMemo(
+    () => orders.reduce((sum, order) => sum + (order.items?.reduce((itemSum, item) => itemSum + item.quantity, 0) ?? 0), 0),
+    [orders],
+  );
 
   if (loading)
     return (
@@ -64,8 +227,6 @@ function Account() {
         </section>
       </SiteLayout>
     );
-
-  const wishItems = products.filter((p) => wish.has(p.id));
 
   return (
     <SiteLayout>
@@ -124,10 +285,10 @@ function Account() {
 
           <TabsContent value="dashboard" className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {[
-              { i: ShoppingBag, l: "Orders", v: mockOrders.length },
-              { i: Repeat, l: "Active Subscriptions", v: 1 },
+              { i: ShoppingBag, l: "Orders", v: orders.length },
+              { i: Repeat, l: "Active Subscriptions", v: subscriptions.filter((item) => item.status === "active").length },
               { i: Heart, l: "Saved Items", v: wish.ids.length },
-              { i: Gift, l: "Saved Gift Boxes", v: 2 },
+              { i: Gift, l: "Ordered Items", v: orderItemCount },
             ].map((s) => (
               <div key={s.l} className="bg-white border border-border rounded-2xl p-5 shadow-soft">
                 <s.i className="w-6 h-6 text-brand" />
@@ -150,22 +311,43 @@ function Account() {
                   </tr>
                 </thead>
                 <tbody className="[&_tr]:border-t [&_tr]:border-border">
-                  {mockOrders.map((o) => (
+                  {ordersLoading && (
+                    <tr>
+                      <td colSpan={6} className="p-8 text-center text-muted-foreground">
+                        <Loader2 className="w-5 h-5 animate-spin mx-auto mb-2" />
+                        Loading orders
+                      </td>
+                    </tr>
+                  )}
+                  {!ordersLoading && orders.map((o) => (
                     <tr key={o.id}>
-                      <td className="p-4 font-mono text-brand">{o.id}</td>
-                      <td className="p-4">{o.date}</td>
-                      <td className="p-4">{o.items}</td>
-                      <td className="p-4 font-semibold">{inr(o.total)}</td>
+                      <td className="p-4 font-mono text-brand">{o.order_number}</td>
+                      <td className="p-4">{new Date(o.created_at).toLocaleDateString("en-IN")}</td>
+                      <td className="p-4">{o.items?.reduce((sum, item) => sum + item.quantity, 0) ?? 0}</td>
+                      <td className="p-4 font-semibold">
+                        {inr(Number(o.total_amount))}
+                        <div className="text-xs text-muted-foreground">Delivery {o.shipping_cost ? inr(Number(o.shipping_cost)) : "Free"}</div>
+                      </td>
                       <td className="p-4">
-                        <span className="text-xs px-2 py-1 rounded-full bg-emerald-100 text-emerald-700 font-semibold">
-                          {o.status}
+                        <span className={`text-xs px-2 py-1 rounded-full font-semibold ${statusTone[o.status]}`}>
+                          {statusLabels[o.status]}
                         </span>
+                        <div className="text-xs text-muted-foreground mt-1">{o.payment_status}</div>
                       </td>
                       <td className="p-4 text-right">
-                        <button className="text-brand hover:underline text-sm">View</button>
+                        <Link to="/account" search={{ tab: "orders" }} className="text-brand hover:underline text-sm">
+                          Track
+                        </Link>
                       </td>
                     </tr>
                   ))}
+                  {!ordersLoading && orders.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="p-8 text-center text-muted-foreground">
+                        No orders yet.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -173,31 +355,78 @@ function Account() {
 
           <TabsContent value="subscriptions">
             <div className="grid md:grid-cols-2 gap-5">
-              <div className="bg-white border border-border rounded-2xl p-6 shadow-soft">
-                <div className="text-xs text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full inline-block font-semibold">
-                  ACTIVE
+              {subscriptionsLoading && (
+                <div className="bg-white border border-border rounded-2xl p-10 text-center text-muted-foreground">
+                  <Loader2 className="w-5 h-5 animate-spin mx-auto mb-2" />
+                  Loading subscriptions
                 </div>
-                <div className="font-display text-2xl font-bold text-brand-deep mt-2">
-                  {subscriptionPlans[0].name}
+              )}
+              {!subscriptionsLoading && subscriptions.map((subscription) => {
+                const plan = subscriptionPlans.find((item) => item.id === subscription.plan_id);
+                const busy = subscriptionActionId === subscription.id;
+                return (
+                  <div key={subscription.id} className="bg-white border border-border rounded-2xl p-6 shadow-soft">
+                    <div className={`text-xs px-2 py-0.5 rounded-full inline-block font-semibold ${
+                      subscription.status === "active"
+                        ? "text-emerald-700 bg-emerald-50"
+                        : "text-amber-700 bg-amber-50"
+                    }`}>
+                      {subscription.status.toUpperCase()}
+                    </div>
+                    <div className="font-display text-2xl font-bold text-brand-deep mt-2">
+                      {plan?.name ?? "Subscription Plan"}
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      Next delivery: {new Date(subscription.next_billing_date).toLocaleDateString("en-IN", {
+                        day: "numeric",
+                        month: "short",
+                        year: "numeric",
+                      })}
+                    </div>
+                    <div className="font-display text-2xl font-bold text-brand mt-3">
+                      {inr(plan?.monthly ?? 0)}{" "}
+                      <span className="text-sm text-muted-foreground">/month</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2 mt-4">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={busy || subscription.status !== "active"}
+                        onClick={() => skipNextDelivery(subscription)}
+                      >
+                        Skip next
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={busy || subscription.status !== "active"}
+                        className="text-amber-700 border-amber-300"
+                        onClick={() => pauseSubscription(subscription)}
+                      >
+                        Pause
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={busy}
+                        className="text-destructive border-destructive/30"
+                        onClick={() => removeSubscription(subscription)}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+              {!subscriptionsLoading && subscriptions.length === 0 && (
+                <div className="bg-white border border-border rounded-2xl p-10 text-center">
+                  <Repeat className="w-8 h-8 text-brand mx-auto" />
+                  <div className="font-display text-2xl font-bold text-brand-deep mt-3">
+                    No active subscriptions
+                  </div>
+                  <div className="text-muted-foreground mt-1">Add a plan whenever you need regular monthly delivery.</div>
                 </div>
-                <div className="text-sm text-muted-foreground">Next delivery: 5 Jul 2026</div>
-                <div className="font-display text-2xl font-bold text-brand mt-3">
-                  {inr(subscriptionPlans[0].monthly)}{" "}
-                  <span className="text-sm text-muted-foreground">/month</span>
-                </div>
-                <div className="flex gap-2 mt-4">
-                  <Button variant="outline" size="sm">
-                    Skip next
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-destructive border-destructive/30"
-                  >
-                    Pause
-                  </Button>
-                </div>
-              </div>
+              )}
               <div className="bg-gradient-cream border-2 border-dashed border-brand/30 rounded-2xl p-6 flex flex-col items-center justify-center text-center">
                 <Repeat className="w-8 h-8 text-brand" />
                 <div className="font-display font-bold text-brand-deep mt-2">Add another plan</div>

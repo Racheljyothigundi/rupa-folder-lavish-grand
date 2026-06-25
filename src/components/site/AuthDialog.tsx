@@ -34,6 +34,23 @@ function validatePhone(phone: string): boolean {
   return /^[+]?[\d\s-]{10,}$/.test(phone.replace(/\s/g, ""));
 }
 
+function friendlyAuthError(error: string) {
+  const message = error.toLowerCase();
+  if (message.includes("email rate limit") || message.includes("rate limit")) {
+    return "Too many email requests. Please wait a few minutes before trying again.";
+  }
+  if (message.includes("already registered") || message.includes("already exists")) {
+    return "An account with this email already exists. Please sign in instead.";
+  }
+  if (message.includes("invalid login credentials")) {
+    return "Incorrect email or password. Please try again.";
+  }
+  if (message.includes("email not confirmed")) {
+    return "Please check your email and confirm your account first.";
+  }
+  return "Something went wrong. Please try again.";
+}
+
 export function AuthDialog() {
   const { open, setOpen } = useAuthModal();
   const { login, signup, signInWithGoogle, resetPassword } = useAuth();
@@ -85,13 +102,7 @@ export function AuthDialog() {
       }
       const { error } = await login(form.email.trim().toLowerCase(), form.password);
       if (error) {
-        if (error.includes("Invalid login credentials")) {
-          toast.error("Incorrect email or password. Please try again.");
-        } else if (error.includes("Email not confirmed")) {
-          toast.error("Please check your email and confirm your account first.");
-        } else {
-          toast.error(error);
-        }
+        toast.error(friendlyAuthError(error));
         setPendingAction(null);
       } else {
         close();
@@ -125,11 +136,7 @@ export function AuthDialog() {
         password: form.password,
       });
       if (error) {
-        if (error.includes("already registered")) {
-          toast.error("An account with this email already exists. Please sign in instead.");
-        } else {
-          toast.error(error);
-        }
+        toast.error(friendlyAuthError(error));
         setPendingAction(null);
       } else {
         close();
@@ -140,7 +147,7 @@ export function AuthDialog() {
         if (error.includes("not found")) {
           toast.error("No account found with this email address.");
         } else {
-          toast.error(error);
+          toast.error(friendlyAuthError(error));
         }
         setPendingAction(null);
       } else {

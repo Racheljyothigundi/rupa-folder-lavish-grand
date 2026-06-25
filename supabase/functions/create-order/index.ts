@@ -8,6 +8,14 @@ const corsHeaders = {
 };
 
 interface CreateOrderRequest {
+  cart_items?: Array<{
+    id: string;
+    name: string;
+    qty?: string;
+    image?: string;
+    price: number;
+    count: number;
+  }>;
   shipping_name: string;
   shipping_phone: string;
   shipping_address_line1: string;
@@ -17,6 +25,13 @@ interface CreateOrderRequest {
   shipping_pincode: string;
   payment_method: string;
   notes?: string;
+}
+
+function getDeliveryCharge(subtotal: number) {
+  if (subtotal <= 0) return 0;
+  if (subtotal < 499) return 99;
+  if (subtotal <= 999) return 49;
+  return 0;
 }
 
 async function createRazorpayOrder(amount: number, receipt: string): Promise<{ id: string } | null> {
@@ -115,6 +130,7 @@ Deno.serve(async (req: Request) => {
 
     const body: CreateOrderRequest = await req.json();
     const {
+      cart_items,
       shipping_name,
       shipping_phone,
       shipping_address_line1,
@@ -141,25 +157,149 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const { data: orderId, error: orderError } = await supabase.rpc("create_order_from_cart", {
-      _user_id: user.id,
-      _shipping_name: shipping_name,
-      _shipping_phone: shipping_phone,
-      _shipping_address_line1: shipping_address_line1,
-      _shipping_address_line2: shipping_address_line2 || null,
-      _shipping_city: shipping_city,
-      _shipping_state: shipping_state,
-      _shipping_pincode: shipping_pincode,
-      _payment_method: payment_method,
-      _notes: notes || null,
-    });
-
-    if (orderError) {
-      console.error("Order creation error:", orderError);
-      return new Response(JSON.stringify({ error: orderError.message }), {
-        status: 400,
+    if ((payment_method === "razorpay" || payment_method === "upi") &&
+      (!Deno.env.get("RAZORPAY_KEY_ID") || !Deno.env.get("RAZORPAY_KEY_SECRET"))) {
+      return new Response(JSON.stringify({ error: "Razorpay is not configured. Add Razorpay keys to Supabase secrets." }), {
+        status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    let orderId: string;
+
+    if (cart_items?.length) {
+      const cleanItems = cart_items
+        .map((item) => ({
+          ...item,
+          id: String(item.id || "").trim(),
+          name: String(item.name || "").trim(),
+          price: Number(item.price),
+          count: Number(item.count),
+        }))
+        .filter((item) => item.id && item.name && item.price > 0 && item.count > 0);
+
+      if (!cleanItems.length) {
+        return new Response(JSON.stringify({ error: "Cart is empty" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const ids = cleanItems.map((item) => item.id);
+      const [{ data: products }, { data: giftBoxes }] = await Promise.all([
+        supabase.from("products").select("id, name, mrp, discount, stock").in("id", ids),
+        supabase.from("gift_boxes").select("id, name, price").in("id", ids),
+      ]);
+
+      const productById = new Map((products ?? []).map((product) => [product.id, product]));
+      const giftBoxById = new Map((giftBoxes ?? []).map((giftBox) => [giftBox.id, giftBox]));
+
+      const orderItems = cleanItems.map((item) => {
+        const product = productById.get(item.id);
+        const giftBox = giftBoxById.get(item.id);
+        const unitPrice = product
+          ? Math.round(Number(product.mrp) * (1 - Number(product.discount) / 100))
+          : giftBox
+            ? Number(giftBox.price)
+            : Math.round(item.price);
+
+        if (product && Number(product.stock) < item.count) {
+          throw new Error(`Insufficient stock for ${product.name}`);
+        }
+
+        return {
+          product_id: product ? item.id : null,
+          gift_box_id: giftBox ? item.id : null,
+          item_name: product?.name ?? giftBox?.name ?? item.name,
+          item_type: product ? "product" : giftBox ? "gift_box" : "custom",
+          quantity: item.count,
+          unit_price: unitPrice,
+          total_price: unitPrice * item.count,
+        };
+      });
+
+      const subtotal = orderItems.reduce((sum, item) => sum + item.total_price, 0);
+      const shippingCost = getDeliveryCharge(subtotal);
+      const totalAmount = subtotal + shippingCost;
+
+      const { data: createdOrder, error: orderError } = await supabase
+        .from("orders")
+        .insert({
+          user_id: user.id,
+          shipping_name,
+          shipping_phone,
+          shipping_address_line1,
+          shipping_address_line2: shipping_address_line2 || null,
+          shipping_city,
+          shipping_state,
+          shipping_pincode,
+          subtotal,
+          shipping_cost: shippingCost,
+          total_amount: totalAmount,
+          payment_method,
+          payment_status: payment_method === "cod" ? "pending" : "processing",
+          status: payment_method === "cod" ? "confirmed" : "pending",
+          notes: notes || null,
+          confirmed_at: payment_method === "cod" ? new Date().toISOString() : null,
+        })
+        .select("id")
+        .single();
+
+      if (orderError || !createdOrder) {
+        console.error("Order creation error:", orderError);
+        return new Response(JSON.stringify({ error: orderError?.message || "Order creation failed" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      orderId = createdOrder.id;
+
+      const { error: itemError } = await supabase
+        .from("order_items")
+        .insert(orderItems.map((item) => ({ ...item, order_id: orderId })));
+
+      if (itemError) {
+        console.error("Order item creation error:", itemError);
+        await supabase.from("orders").delete().eq("id", orderId);
+        return new Response(JSON.stringify({ error: itemError.message }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      for (const item of orderItems) {
+        if (!item.product_id) continue;
+        const product = productById.get(item.product_id);
+        if (!product) continue;
+        await supabase
+          .from("products")
+          .update({ stock: Number(product.stock) - item.quantity })
+          .eq("id", item.product_id);
+      }
+    } else {
+      const { data: rpcOrderId, error: orderError } = await supabase.rpc("create_order_from_cart", {
+        _user_id: user.id,
+        _shipping_name: shipping_name,
+        _shipping_phone: shipping_phone,
+        _shipping_address_line1: shipping_address_line1,
+        _shipping_address_line2: shipping_address_line2 || null,
+        _shipping_city: shipping_city,
+        _shipping_state: shipping_state,
+        _shipping_pincode: shipping_pincode,
+        _payment_method: payment_method,
+        _notes: notes || null,
+      });
+
+      if (orderError) {
+        console.error("Order creation error:", orderError);
+        return new Response(JSON.stringify({ error: orderError.message }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      orderId = rpcOrderId;
     }
 
     const { data: order, error: fetchError } = await supabase

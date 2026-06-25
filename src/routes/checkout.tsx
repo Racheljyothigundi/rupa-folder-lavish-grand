@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { inr, useCart, useAuth } from "@/lib/store";
+import { getDeliveryCharge } from "@/lib/shipping";
 import { CreditCard, Truck, ShieldCheck, BadgeCheck, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -51,7 +52,7 @@ function Checkout() {
     pincode: "500051",
   });
 
-  const ship = cart.subtotal > 999 ? 0 : 79;
+  const ship = getDeliveryCharge(cart.subtotal);
   const total = cart.subtotal + ship;
 
   useEffect(() => {
@@ -72,25 +73,17 @@ function Checkout() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Not authenticated");
 
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/verify-payment`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({
-            razorpay_order_id,
-            razorpay_payment_id,
-            razorpay_signature,
-            order_id: orderId,
-          }),
-        }
-      );
+      const { data: result, error } = await supabase.functions.invoke("verify-payment", {
+        body: {
+          razorpay_order_id,
+          razorpay_payment_id,
+          razorpay_signature,
+          order_id: orderId,
+        },
+      });
 
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Verification failed");
+      if (error) throw new Error(error.message || "Verification failed");
+      if (!result?.order) throw new Error("Payment verified, but the order was not returned");
 
       setOrder(result.order);
       cart.clear();
@@ -107,10 +100,11 @@ function Checkout() {
   const openRazorpayCheckout = (
     razorpayOrderId: string,
     orderId: string,
-    amount: number
+    amount: number,
+    keyId?: string
   ) => {
     const options: RazorpayOptions = {
-      key: import.meta.env.VITE_RAZORPAY_KEY_ID || "rzp_test_YourKeyIdHere",
+      key: keyId || import.meta.env.VITE_RAZORPAY_KEY_ID || "rzp_test_YourKeyIdHere",
       amount: Math.round(amount * 100),
       currency: "INR",
       name: "Lavish Grand Traders",
@@ -157,28 +151,28 @@ function Checkout() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Not authenticated");
 
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-order`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({
-            shipping_name: form.fullName,
-            shipping_phone: form.phone,
-            shipping_address_line1: form.address,
-            shipping_city: form.city,
-            shipping_state: "Telangana",
-            shipping_pincode: form.pincode,
-            payment_method: paymentMethod === "cod" ? "cod" : "razorpay",
-          }),
-        }
-      );
+      const { data: result, error } = await supabase.functions.invoke("create-order", {
+        body: {
+          cart_items: cart.lines.map((line) => ({
+            id: line.id,
+            name: line.name,
+            qty: line.qty,
+            image: line.image,
+            price: line.price,
+            count: line.count,
+          })),
+          shipping_name: form.fullName,
+          shipping_phone: form.phone,
+          shipping_address_line1: form.address,
+          shipping_city: form.city,
+          shipping_state: "Telangana",
+          shipping_pincode: form.pincode,
+          payment_method: paymentMethod === "cod" ? "cod" : "razorpay",
+        },
+      });
 
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Order creation failed");
+      if (error) throw new Error(error.message || "Order creation failed");
+      if (!result?.order) throw new Error("Order creation failed");
 
       if (paymentMethod === "cod") {
         setOrder(result.order);
@@ -189,7 +183,8 @@ function Checkout() {
         openRazorpayCheckout(
           result.razorpay_order_id,
           result.order.id,
-          result.order.total_amount
+          result.order.total_amount,
+          result.razorpay_key_id
         );
       } else {
         throw new Error("Failed to initialize payment");
