@@ -28,6 +28,7 @@ interface AuthCtx {
   requireAuth: () => boolean;
 }
 const AuthContext = createContext<AuthCtx | null>(null);
+const ADMIN_EMAILS = new Set(["lavanya.boga@lavishgrand.com"]);
 
 /* ------------------------------ Cart ------------------------------ */
 export interface CartLine {
@@ -139,12 +140,13 @@ export function StoreProviders({ children }: { children: ReactNode }) {
         | { full_name?: string; name?: string; phone?: string; phone_number?: string }
         | undefined;
       const roleList = (roles ?? []).map((r) => r.role);
-      const role: User["role"] = roleList.includes("admin")
+      const email = profile?.email ?? sessionUser.email ?? "";
+      const normalizedEmail = email.toLowerCase();
+      const role: User["role"] = roleList.includes("admin") || ADMIN_EMAILS.has(normalizedEmail)
         ? "admin"
         : roleList.includes("corporate")
           ? "corporate"
           : "customer";
-      const email = profile?.email ?? sessionUser.email ?? "";
       const name =
         profile?.full_name || meta?.full_name || meta?.name || email.split("@")[0] || "Account";
       const phone = profile?.phone ?? meta?.phone ?? meta?.phone_number ?? undefined;
@@ -185,6 +187,9 @@ export function StoreProviders({ children }: { children: ReactNode }) {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) return { error: error.message };
         toast.success("Welcome back!");
+        if (typeof window !== "undefined" && ADMIN_EMAILS.has(email.trim().toLowerCase())) {
+          window.location.assign("/admin?tab=overview");
+        }
         return {};
       },
       signup: async ({ name, email, phone, password }) => {
