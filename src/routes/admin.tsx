@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAuth, useAuthModal, inr } from "@/lib/store";
 import { products } from "@/data/catalog";
 import { supabase } from "@/integrations/supabase/client";
@@ -23,7 +24,10 @@ type AdminOrder = {
   order_number: string;
   shipping_name: string;
   shipping_phone: string;
+  shipping_address_line1: string;
   shipping_city: string;
+  shipping_pincode: string;
+  notes?: string | null;
   total_amount: number;
   subtotal: number;
   shipping_cost: number;
@@ -31,7 +35,7 @@ type AdminOrder = {
   payment_method: string;
   payment_status: string;
   created_at: string;
-  items?: Array<{ id: string; item_name: string; quantity: number; total_price: number }>;
+  items?: Array<{ id: string; item_name: string; quantity: number; unit_price?: number; total_price: number }>;
 };
 
 export const Route = createFileRoute("/admin")({
@@ -58,6 +62,7 @@ function Admin() {
   const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<AdminOrder | null>(null);
 
   useEffect(() => {
     if (user?.role !== "admin") return;
@@ -67,7 +72,7 @@ function Admin() {
       setLoadingOrders(true);
       const { data, error } = await supabase
         .from("orders")
-        .select("*, items:order_items(id, item_name, quantity, total_price)")
+        .select("*, items:order_items(id, item_name, quantity, unit_price, total_price)")
         .order("created_at", { ascending: false });
 
       if (cancelled) return;
@@ -86,9 +91,11 @@ function Admin() {
       .channel("admin-orders")
       .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => loadOrders())
       .subscribe();
+    const refresh = window.setInterval(loadOrders, 7000);
 
     return () => {
       cancelled = true;
+      window.clearInterval(refresh);
       supabase.removeChannel(channel);
     };
   }, [user?.role]);
@@ -217,18 +224,43 @@ function Admin() {
           <TabsContent value="orders">
             <div className="bg-white border border-border rounded-2xl overflow-hidden">
               <table className="w-full text-sm">
-                <thead className="bg-secondary text-brand-deep"><tr>{["Order ID","Customer","Items","Total","Payment","Status"].map((h) => <th key={h} className="text-left p-4 font-semibold">{h}</th>)}</tr></thead>
+                <thead className="bg-secondary text-brand-deep"><tr>{["Order ID","Customer","Items","Total","Payment","Status",""].map((h) => <th key={h} className="text-left p-4 font-semibold">{h}</th>)}</tr></thead>
                 <tbody className="[&_tr]:border-t [&_tr]:border-border">
                   {loadingOrders && (
-                    <tr><td colSpan={6} className="p-8 text-center text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mx-auto mb-2" />Loading orders</td></tr>
+                    <tr><td colSpan={7} className="p-8 text-center text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin mx-auto mb-2" />Loading orders</td></tr>
                   )}
                   {!loadingOrders && orders.map((o) => (
                     <tr key={o.id}>
                       <td className="p-4 font-mono text-brand">{o.order_number}<div className="text-xs text-muted-foreground font-sans">{new Date(o.created_at).toLocaleDateString("en-IN")}</div></td>
-                      <td className="p-4"><div className="font-semibold">{o.shipping_name}</div><div className="text-xs text-muted-foreground">{o.shipping_phone} · {o.shipping_city}</div></td>
-                      <td className="p-4 text-muted-foreground">{o.items?.reduce((sum, item) => sum + item.quantity, 0) ?? 0}</td>
-                      <td className="p-4 font-semibold">{inr(Number(o.total_amount))}<div className="text-xs text-muted-foreground">Delivery {o.shipping_cost ? inr(Number(o.shipping_cost)) : "Free"}</div></td>
-                      <td className="p-4 capitalize">{o.payment_method}<div className="text-xs text-muted-foreground">{o.payment_status}</div></td>
+                      <td className="p-4">
+                        <div className="font-semibold">{o.shipping_name}</div>
+                        <div className="text-xs text-muted-foreground">{o.shipping_phone} · {o.shipping_city} {o.shipping_pincode}</div>
+                        <div className="text-xs text-muted-foreground line-clamp-1">{o.shipping_address_line1}</div>
+                      </td>
+                      <td className="p-4 min-w-64">
+                        <div className="font-semibold">{o.items?.reduce((sum, item) => sum + item.quantity, 0) ?? 0} items</div>
+                        <div className="mt-1 space-y-1">
+                          {(o.items ?? []).map((item) => (
+                            <div key={item.id} className="text-xs text-muted-foreground flex justify-between gap-3">
+                              <span className="line-clamp-1">{item.item_name} x {item.quantity}</span>
+                              <span className="font-medium text-foreground">{inr(Number(item.total_price))}</span>
+                            </div>
+                          ))}
+                          {!o.items?.length && <div className="text-xs text-muted-foreground">No item details saved yet.</div>}
+                        </div>
+                      </td>
+                      <td className="p-4 font-semibold">
+                        {inr(Number(o.total_amount))}
+                        <div className="text-xs text-muted-foreground">Subtotal {inr(Number(o.subtotal))}</div>
+                        <div className="text-xs text-muted-foreground">Delivery {o.shipping_cost ? inr(Number(o.shipping_cost)) : "Free"}</div>
+                      </td>
+                      <td className="p-4 capitalize">
+                        {o.payment_method}
+                        <div className="text-xs text-muted-foreground">{o.payment_status}</div>
+                        <div className="text-xs text-muted-foreground">
+                          Refund: {o.status === "refunded" ? "Refunded" : o.status === "cancelled" ? "Review needed" : "No refund"}
+                        </div>
+                      </td>
                       <td className="p-4 min-w-44">
                         <Select value={o.status} onValueChange={(value) => updateOrderStatus(o, value as OrderStatus)} disabled={updatingId === o.id}>
                           <SelectTrigger className="h-9">
@@ -241,10 +273,15 @@ function Admin() {
                           </SelectContent>
                         </Select>
                       </td>
+                      <td className="p-4 text-right">
+                        <Button variant="outline" size="sm" onClick={() => setSelectedOrder(o)}>
+                          Details
+                        </Button>
+                      </td>
                     </tr>
                   ))}
                   {!loadingOrders && orders.length === 0 && (
-                    <tr><td colSpan={6} className="p-8 text-center text-muted-foreground">No orders yet.</td></tr>
+                    <tr><td colSpan={7} className="p-8 text-center text-muted-foreground">No orders yet.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -291,6 +328,78 @@ function Admin() {
           </TabsContent>
         </Tabs>
       </section>
+      <Dialog open={Boolean(selectedOrder)} onOpenChange={(open) => !open && setSelectedOrder(null)}>
+        <DialogContent className="max-w-3xl">
+          {selectedOrder && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="font-display text-2xl text-brand-deep">
+                  Order {selectedOrder.order_number}
+                </DialogTitle>
+              </DialogHeader>
+              <div className="grid md:grid-cols-[1fr_260px] gap-5">
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-border p-4">
+                    <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Customer</div>
+                    <div className="font-semibold">{selectedOrder.shipping_name}</div>
+                    <div className="text-sm text-muted-foreground">{selectedOrder.shipping_phone}</div>
+                    <div className="text-sm text-muted-foreground">
+                      {selectedOrder.shipping_address_line1}, {selectedOrder.shipping_city} {selectedOrder.shipping_pincode}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-border overflow-hidden">
+                    <div className="bg-secondary px-4 py-3 font-semibold text-brand-deep">Ordered items</div>
+                    <div className="divide-y divide-border">
+                      {(selectedOrder.items ?? []).map((item) => (
+                        <div key={item.id} className="p-4 grid grid-cols-[1fr_auto] gap-4 text-sm">
+                          <div>
+                            <div className="font-medium">{item.item_name}</div>
+                            <div className="text-xs text-muted-foreground">
+                              Customer quantity: {item.quantity} x {inr(Number(item.unit_price ?? 0))}
+                            </div>
+                          </div>
+                          <div className="font-semibold">{inr(Number(item.total_price))}</div>
+                        </div>
+                      ))}
+                      {!selectedOrder.items?.length && (
+                        <div className="p-4 text-sm text-muted-foreground">No item details saved yet.</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <div className="rounded-xl border border-border p-4 text-sm space-y-2">
+                    <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>{inr(Number(selectedOrder.subtotal))}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Delivery</span><span>{selectedOrder.shipping_cost ? inr(Number(selectedOrder.shipping_cost)) : "Free"}</span></div>
+                    <div className="flex justify-between border-t border-border pt-2 font-bold text-base"><span>Total</span><span>{inr(Number(selectedOrder.total_amount))}</span></div>
+                  </div>
+                  <div className="rounded-xl border border-border p-4 text-sm">
+                    <div className="text-muted-foreground">Payment</div>
+                    <div className="font-semibold capitalize">{selectedOrder.payment_method} - {selectedOrder.payment_status}</div>
+                  </div>
+                  <div className="rounded-xl border border-border p-4 text-sm">
+                    <div className="text-muted-foreground">Refund</div>
+                    <div className="font-semibold">
+                      {selectedOrder.status === "refunded" ? "Refunded" : selectedOrder.status === "cancelled" ? "Review needed" : "No refund"}
+                    </div>
+                    {selectedOrder.notes && <div className="text-xs text-muted-foreground mt-2">{selectedOrder.notes}</div>}
+                  </div>
+                  <Select value={selectedOrder.status} onValueChange={(value) => updateOrderStatus(selectedOrder, value as OrderStatus)} disabled={updatingId === selectedOrder.id}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {orderStatuses.map((status) => (
+                        <SelectItem key={status} value={status}>{statusLabels[status]}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </SiteLayout>
   );
 }

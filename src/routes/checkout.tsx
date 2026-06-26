@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { inr, useCart, useAuth } from "@/lib/store";
-import { getDeliveryCharge } from "@/lib/shipping";
+import { getCodDeliveryCharge, getDeliveryCharge } from "@/lib/shipping";
 import { CreditCard, Truck, ShieldCheck, BadgeCheck, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -30,6 +30,16 @@ interface RazorpayOptions {
   modal?: { ondismiss?: () => void };
 }
 
+type CheckoutOrderItem = {
+  product_id: string | null;
+  gift_box_id: string | null;
+  item_name: string;
+  item_type: string;
+  quantity: number;
+  unit_price: number;
+  total_price: number;
+};
+
 export const Route = createFileRoute("/checkout")({
   head: () => ({ meta: [{ title: "Checkout — Lavish Grand Traders" }] }),
   component: Checkout,
@@ -49,10 +59,13 @@ function Checkout() {
     phone: "",
     address: "",
     city: "Hyderabad",
+    state: "Telangana",
     pincode: "500051",
   });
 
-  const ship = getDeliveryCharge(cart.subtotal);
+  const standardDeliveryCharge = getDeliveryCharge(cart.subtotal);
+  const codDeliveryCharge = paymentMethod === "cod" ? getCodDeliveryCharge(form.city, form.state) : 0;
+  const ship = standardDeliveryCharge + codDeliveryCharge;
   const total = cart.subtotal + ship;
 
   useEffect(() => {
@@ -136,6 +149,62 @@ function Checkout() {
     rzp.open();
   };
 
+  const buildOrderItems = (): CheckoutOrderItem[] =>
+    cart.lines.map((line) => {
+      const isProduct = /^p\d+/.test(line.id);
+      const isGiftBox = /^g\d+/.test(line.id);
+
+      return {
+        product_id: isProduct ? line.id : null,
+        gift_box_id: isGiftBox ? line.id : null,
+        item_name: line.qty ? `${line.name} - ${line.qty}` : line.name,
+        item_type: isProduct ? "product" : isGiftBox ? "gift_box" : "custom",
+        quantity: line.count,
+        unit_price: line.price,
+        total_price: line.price * line.count,
+      };
+    });
+
+  const createCodOrderDirectly = async () => {
+    if (!auth.user) throw new Error("Not authenticated");
+
+    const { data: createdOrder, error: orderError } = await supabase
+      .from("orders")
+      .insert({
+        user_id: auth.user.id,
+        shipping_name: form.fullName,
+        shipping_phone: form.phone,
+        shipping_address_line1: form.address,
+        shipping_city: form.city,
+        shipping_state: form.state,
+        shipping_pincode: form.pincode,
+        subtotal: cart.subtotal,
+        shipping_cost: ship,
+        total_amount: total,
+        payment_method: "cod",
+        payment_status: "pending",
+        status: "confirmed",
+        confirmed_at: new Date().toISOString(),
+      })
+      .select("*")
+      .single();
+
+    if (orderError || !createdOrder) {
+      throw new Error(orderError?.message || "Order creation failed");
+    }
+
+    const { data: items, error: itemError } = await supabase
+      .from("order_items")
+      .insert(buildOrderItems().map((item) => ({ ...item, order_id: createdOrder.id })))
+      .select("*");
+
+    if (itemError) {
+      throw new Error(itemError.message || "Order items could not be saved");
+    }
+
+    return { ...createdOrder, items: items ?? [] };
+  };
+
   const createOrder = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -151,6 +220,15 @@ function Checkout() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Not authenticated");
 
+      if (paymentMethod === "cod") {
+        const codOrder = await createCodOrderDirectly();
+        setOrder(codOrder);
+        cart.clear();
+        setDone(true);
+        toast.success("Order placed successfully! Admin can see it now.");
+        return;
+      }
+
       const { data: result, error } = await supabase.functions.invoke("create-order", {
         body: {
           cart_items: cart.lines.map((line) => ({
@@ -165,21 +243,16 @@ function Checkout() {
           shipping_phone: form.phone,
           shipping_address_line1: form.address,
           shipping_city: form.city,
-          shipping_state: "Telangana",
+          shipping_state: form.state,
           shipping_pincode: form.pincode,
-          payment_method: paymentMethod === "cod" ? "cod" : "razorpay",
+          payment_method: "razorpay",
         },
       });
 
       if (error) throw new Error(error.message || "Order creation failed");
       if (!result?.order) throw new Error("Order creation failed");
 
-      if (paymentMethod === "cod") {
-        setOrder(result.order);
-        cart.clear();
-        setDone(true);
-        toast.success("Order placed successfully!");
-      } else if (result.razorpay_order_id) {
+      if (result.razorpay_order_id) {
         openRazorpayCheckout(
           result.razorpay_order_id,
           result.order.id,
@@ -259,6 +332,14 @@ function Checkout() {
                   />
                 </div>
                 <div className="space-y-1.5">
+                  <Label>State *</Label>
+                  <Input
+                    required
+                    value={form.state}
+                    onChange={(e) => setForm({ ...form, state: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1.5">
                   <Label>Pincode *</Label>
                   <Input
                     required
@@ -318,8 +399,14 @@ function Checkout() {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Shipping</span>
-                <span>{ship === 0 ? "Free" : inr(ship)}</span>
+                <span>{standardDeliveryCharge === 0 ? "Free" : inr(standardDeliveryCharge)}</span>
               </div>
+              {paymentMethod === "cod" && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">COD delivery charge</span>
+                  <span>{inr(codDeliveryCharge)}</span>
+                </div>
+              )}
             </div>
             <div className="border-t border-border mt-4 pt-4 flex justify-between items-baseline">
               <span className="text-muted-foreground">Total</span>

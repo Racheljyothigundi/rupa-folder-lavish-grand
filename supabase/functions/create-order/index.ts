@@ -34,6 +34,15 @@ function getDeliveryCharge(subtotal: number) {
   return 0;
 }
 
+function getCodDeliveryCharge(city: string, state: string) {
+  const normalizedCity = city.trim().toLowerCase();
+  const normalizedState = state.trim().toLowerCase();
+
+  if (normalizedCity === "hyderabad") return 50;
+  if (normalizedState.includes("andhra")) return 90;
+  return 70;
+}
+
 async function createRazorpayOrder(amount: number, receipt: string): Promise<{ id: string } | null> {
   const keyId = Deno.env.get("RAZORPAY_KEY_ID");
   const keySecret = Deno.env.get("RAZORPAY_KEY_SECRET");
@@ -173,6 +182,7 @@ Deno.serve(async (req: Request) => {
           ...item,
           id: String(item.id || "").trim(),
           name: String(item.name || "").trim(),
+          qty: String(item.qty || "").trim(),
           price: Number(item.price),
           count: Number(item.count),
         }))
@@ -187,7 +197,7 @@ Deno.serve(async (req: Request) => {
 
       const ids = cleanItems.map((item) => item.id);
       const [{ data: products }, { data: giftBoxes }] = await Promise.all([
-        supabase.from("products").select("id, name, mrp, discount, stock").in("id", ids),
+        supabase.from("products").select("id, name, qty, mrp, discount, stock").in("id", ids),
         supabase.from("gift_boxes").select("id, name, price").in("id", ids),
       ]);
 
@@ -210,7 +220,7 @@ Deno.serve(async (req: Request) => {
         return {
           product_id: product ? item.id : null,
           gift_box_id: giftBox ? item.id : null,
-          item_name: product?.name ?? giftBox?.name ?? item.name,
+          item_name: `${product?.name ?? giftBox?.name ?? item.name}${product?.qty || item.qty ? ` - ${product?.qty ?? item.qty}` : ""}`,
           item_type: product ? "product" : giftBox ? "gift_box" : "custom",
           quantity: item.count,
           unit_price: unitPrice,
@@ -219,7 +229,8 @@ Deno.serve(async (req: Request) => {
       });
 
       const subtotal = orderItems.reduce((sum, item) => sum + item.total_price, 0);
-      const shippingCost = getDeliveryCharge(subtotal);
+      const shippingCost = getDeliveryCharge(subtotal) +
+        (payment_method === "cod" ? getCodDeliveryCharge(shipping_city, shipping_state) : 0);
       const totalAmount = subtotal + shippingCost;
 
       const { data: createdOrder, error: orderError } = await supabase

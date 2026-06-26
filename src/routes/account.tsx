@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAuth, useAuthModal, useWishlist, inr } from "@/lib/store";
 import { products, subscriptionPlans } from "@/data/catalog";
 import { supabase } from "@/integrations/supabase/client";
@@ -26,8 +27,12 @@ type CustomerOrder = {
   payment_status: string;
   total_amount: number;
   shipping_cost: number;
+  notes?: string | null;
   created_at: string;
-  items?: Array<{ id: string; item_name: string; quantity: number; total_price: number }>;
+  confirmed_at?: string | null;
+  shipped_at?: string | null;
+  delivered_at?: string | null;
+  items?: Array<{ id: string; item_name: string; quantity: number; unit_price?: number; total_price: number }>;
 };
 type CustomerSubscription = {
   id: string;
@@ -73,6 +78,7 @@ function Account() {
   const [subscriptions, setSubscriptions] = useState<CustomerSubscription[]>([]);
   const [subscriptionsLoading, setSubscriptionsLoading] = useState(false);
   const [subscriptionActionId, setSubscriptionActionId] = useState<string | null>(null);
+  const [trackedOrder, setTrackedOrder] = useState<CustomerOrder | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -82,7 +88,7 @@ function Account() {
       setOrdersLoading(true);
       const { data, error } = await supabase
         .from("orders")
-        .select("*, items:order_items(id, item_name, quantity, total_price)")
+        .select("*, items:order_items(id, item_name, quantity, unit_price, total_price)")
         .order("created_at", { ascending: false });
 
       if (cancelled) return;
@@ -323,7 +329,13 @@ function Account() {
                     <tr key={o.id}>
                       <td className="p-4 font-mono text-brand">{o.order_number}</td>
                       <td className="p-4">{new Date(o.created_at).toLocaleDateString("en-IN")}</td>
-                      <td className="p-4">{o.items?.reduce((sum, item) => sum + item.quantity, 0) ?? 0}</td>
+                      <td className="p-4">
+                        <div className="font-semibold">{o.items?.reduce((sum, item) => sum + item.quantity, 0) ?? 0}</div>
+                        <div className="text-xs text-muted-foreground line-clamp-1">
+                          {o.items?.[0]?.item_name ?? "Order items"}
+                          {(o.items?.length ?? 0) > 1 ? ` + ${(o.items?.length ?? 1) - 1} more` : ""}
+                        </div>
+                      </td>
                       <td className="p-4 font-semibold">
                         {inr(Number(o.total_amount))}
                         <div className="text-xs text-muted-foreground">Delivery {o.shipping_cost ? inr(Number(o.shipping_cost)) : "Free"}</div>
@@ -335,9 +347,13 @@ function Account() {
                         <div className="text-xs text-muted-foreground mt-1">{o.payment_status}</div>
                       </td>
                       <td className="p-4 text-right">
-                        <Link to="/account" search={{ tab: "orders" }} className="text-brand hover:underline text-sm">
+                        <button
+                          type="button"
+                          onClick={() => setTrackedOrder(o)}
+                          className="text-brand hover:underline text-sm"
+                        >
                           Track
-                        </Link>
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -488,6 +504,83 @@ function Account() {
           </TabsContent>
         </Tabs>
       </section>
+      <Dialog open={Boolean(trackedOrder)} onOpenChange={(open) => !open && setTrackedOrder(null)}>
+        <DialogContent className="max-w-2xl">
+          {trackedOrder && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="font-display text-2xl text-brand-deep">
+                  Track {trackedOrder.order_number}
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-5">
+                <div className="grid sm:grid-cols-4 gap-2">
+                  {(["confirmed", "processing", "shipped", "delivered"] as CustomerOrder["status"][]).map((status) => {
+                    const complete = orderStatusRank(trackedOrder.status) >= orderStatusRank(status);
+                    return (
+                      <div key={status} className={`rounded-xl border p-3 ${complete ? "border-brand bg-brand/5" : "border-border bg-secondary/40"}`}>
+                        <div className={`w-3 h-3 rounded-full mb-2 ${complete ? "bg-brand" : "bg-muted-foreground/30"}`} />
+                        <div className="text-sm font-semibold">{statusLabels[status]}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="grid sm:grid-cols-3 gap-3 text-sm">
+                  <div className="rounded-xl border border-border p-3">
+                    <div className="text-muted-foreground">Payment</div>
+                    <div className="font-semibold capitalize">{trackedOrder.payment_status}</div>
+                  </div>
+                  <div className="rounded-xl border border-border p-3">
+                    <div className="text-muted-foreground">Delivery</div>
+                    <div className="font-semibold">{trackedOrder.shipping_cost ? inr(Number(trackedOrder.shipping_cost)) : "Free"}</div>
+                  </div>
+                  <div className="rounded-xl border border-border p-3">
+                    <div className="text-muted-foreground">Refund</div>
+                    <div className="font-semibold">{trackedOrder.status === "refunded" ? "Refunded" : trackedOrder.status === "cancelled" ? "Eligible for review" : "No refund requested"}</div>
+                  </div>
+                </div>
+                <div>
+                  <div className="font-semibold text-brand-deep mb-2">Ordered items</div>
+                  <div className="rounded-xl border border-border divide-y overflow-hidden">
+                    {(trackedOrder.items ?? []).map((item) => (
+                      <div key={item.id} className="grid grid-cols-[1fr_auto] gap-4 p-3 text-sm">
+                        <div>
+                          <div className="font-medium">{item.item_name}</div>
+                          <div className="text-xs text-muted-foreground">
+                            Customer quantity: {item.quantity} x {inr(Number(item.unit_price ?? 0))}
+                          </div>
+                        </div>
+                        <div className="font-semibold">{inr(Number(item.total_price))}</div>
+                      </div>
+                    ))}
+                    {!trackedOrder.items?.length && (
+                      <div className="p-3 text-sm text-muted-foreground">Items are still syncing for this order.</div>
+                    )}
+                  </div>
+                </div>
+                <div className="rounded-xl bg-secondary p-3 text-sm text-muted-foreground">
+                  {trackedOrder.notes
+                    ? trackedOrder.notes
+                    : "Refunds are tracked when the order is cancelled or marked refunded by the admin. For paid orders, the final refund depends on payment verification and business approval."}
+                </div>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </SiteLayout>
   );
+}
+
+function orderStatusRank(status: CustomerOrder["status"]) {
+  const rank: Record<CustomerOrder["status"], number> = {
+    pending: 0,
+    confirmed: 1,
+    processing: 2,
+    shipped: 3,
+    delivered: 4,
+    cancelled: 0,
+    refunded: 0,
+  };
+  return rank[status];
 }
