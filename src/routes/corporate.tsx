@@ -27,8 +27,8 @@ function Corporate() {
             <h1 className="font-display text-5xl md:text-6xl font-bold mt-3">Gifts <span className="text-gradient-gold">your brand deserves</span></h1>
             <p className="text-white/70 max-w-md mt-4">From Diwali hampers to onboarding gifts — we curate, brand and deliver premium dry-fruit boxes at scale.</p>
             <div className="mt-6 flex gap-3">
-              <Button asChild size="lg" className="bg-gradient-gold text-brand-deep"><a href="#quote">Request a Quote</a></Button>
-              <Button asChild size="lg" variant="outline" className="border-white/20 text-white hover:bg-white/10"><a href="tel:+919848956829">Call +91 98489 56829</a></Button>
+              <Button asChild size="lg" className="bg-gradient-gold text-brand-deep shadow-elegant hover:brightness-105"><a href="#quote">Request a Quote</a></Button>
+              <Button asChild size="lg" className="bg-gradient-gold text-brand-deep shadow-elegant hover:brightness-105"><a href="tel:+919848956829">Call +91 98489 56829</a></Button>
             </div>
           </div>
           <img src={giftHero} alt="Corporate gift boxes" loading="lazy" className="rounded-3xl shadow-elegant ring-1 ring-white/10" />

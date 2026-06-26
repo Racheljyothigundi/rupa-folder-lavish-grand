@@ -31,8 +31,8 @@ function GiftBoxes() {
             <h1 className="font-display text-5xl md:text-6xl font-bold mt-3">Gift <span className="text-gradient-gold">extraordinary</span></h1>
             <p className="mt-4 text-white/70 max-w-md">Ten signature collections — from intimate Happiness Box to the regal Royal Delight. Custom messages, branding, and bulk gifting available.</p>
             <div className="mt-6 flex gap-3">
-              <Button asChild size="lg" className="bg-gradient-gold text-brand-deep"><a href="#collections">Browse Collections</a></Button>
-              <Button asChild size="lg" variant="outline" className="border-white/20 text-white hover:bg-white/10"><Link to="/corporate">Corporate Quote</Link></Button>
+              <Button asChild size="lg" className="bg-gradient-gold text-brand-deep shadow-elegant hover:brightness-105"><a href="#collections">Browse Collections</a></Button>
+              <Button asChild size="lg" className="bg-gradient-gold text-brand-deep shadow-elegant hover:brightness-105"><Link to="/corporate">Corporate Quote</Link></Button>
             </div>
           </div>
           <img src={giftHero} alt="Lavish Grand premium gift box" loading="lazy" className="rounded-3xl shadow-elegant ring-1 ring-white/10" />
