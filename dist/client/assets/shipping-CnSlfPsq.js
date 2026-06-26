@@ -1,1 +1,0 @@
-function e(e){return e<=0?0:e<499?99:e<=999?49:0}function t(e){return e<=0||e>999?0:1e3-e}export{t as n,e as t};
