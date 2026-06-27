@@ -111,6 +111,13 @@ export function StoreProviders({ children }: { children: ReactNode }) {
 
   // Hydrate user from Supabase session + profile/role
   useEffect(() => {
+    if (window.sessionStorage.getItem("lavish-grand:auth-success") === "true") {
+      window.sessionStorage.removeItem("lavish-grand:auth-success");
+      toast.success("You have signed in successfully. Welcome!");
+    }
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function loadUser(sessionUser: SupabaseAuthUser | null) {

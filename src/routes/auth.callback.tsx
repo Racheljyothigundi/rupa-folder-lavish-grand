@@ -1,7 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, Loader2 } from "lucide-react";
-import { toast } from "sonner";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
@@ -93,7 +92,7 @@ function AuthCallbackPage() {
 
       if (!active) return;
 
-      toast.success("Signed in successfully.");
+      window.sessionStorage.setItem("lavish-grand:auth-success", "true");
       window.location.replace(safeNext);
     };
 
