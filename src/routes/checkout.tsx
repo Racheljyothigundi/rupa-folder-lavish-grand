@@ -13,8 +13,19 @@ import { supabase } from "@/integrations/supabase/client";
 
 declare global {
   interface Window {
-    Razorpay: new (options: RazorpayOptions) => { open: () => void; close: () => void };
+    Razorpay?: new (options: RazorpayOptions) => {
+      open: () => void;
+      close: () => void;
+      on: (event: string, handler: (response: RazorpayFailureResponse) => void) => void;
+    };
   }
+}
+
+interface RazorpayFailureResponse {
+  error?: {
+    description?: string;
+    reason?: string;
+  };
 }
 
 interface RazorpayOptions {
@@ -28,17 +39,8 @@ interface RazorpayOptions {
   prefill?: { name?: string; email?: string; contact?: string };
   theme?: { color?: string };
   modal?: { ondismiss?: () => void };
+  retry?: { enabled: boolean };
 }
-
-type CheckoutOrderItem = {
-  product_id: string | null;
-  gift_box_id: string | null;
-  item_name: string;
-  item_type: string;
-  quantity: number;
-  unit_price: number;
-  total_price: number;
-};
 
 export const Route = createFileRoute("/checkout")({
   head: () => ({ meta: [{ title: "Checkout — Lavish Grand Traders" }] }),
@@ -51,6 +53,7 @@ function Checkout() {
   const nav = useNavigate();
   const [done, setDone] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [checkoutReady, setCheckoutReady] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("razorpay");
   const [order, setOrder] = useState<any>(null);
 
@@ -72,6 +75,11 @@ function Checkout() {
     const script = document.createElement("script");
     script.src = "https://checkout.razorpay.com/v1/checkout.js";
     script.async = true;
+    script.onload = () => setCheckoutReady(true);
+    script.onerror = () => {
+      setCheckoutReady(false);
+      toast.error("Secure payment checkout could not be loaded. Please refresh and try again.");
+    };
     document.body.appendChild(script);
     return () => { document.body.removeChild(script); };
   }, []);
@@ -117,7 +125,7 @@ function Checkout() {
     keyId?: string
   ) => {
     const options: RazorpayOptions = {
-      key: keyId || import.meta.env.VITE_RAZORPAY_KEY_ID || "rzp_test_YourKeyIdHere",
+      key: keyId || "",
       amount: Math.round(amount * 100),
       currency: "INR",
       name: "Lavish Grand Traders",
@@ -143,66 +151,21 @@ function Checkout() {
           toast.info("Payment cancelled. You can try again.");
         },
       },
+      retry: { enabled: true },
     };
 
+    if (!keyId || !window.Razorpay) {
+      setLoading(false);
+      toast.error("Razorpay is not ready. Please refresh the page and try again.");
+      return;
+    }
+
     const rzp = new window.Razorpay(options);
-    rzp.open();
-  };
-
-  const buildOrderItems = (): CheckoutOrderItem[] =>
-    cart.lines.map((line) => {
-      const isProduct = /^p\d+/.test(line.id);
-      const isGiftBox = /^g\d+/.test(line.id);
-
-      return {
-        product_id: isProduct ? line.id : null,
-        gift_box_id: isGiftBox ? line.id : null,
-        item_name: line.qty ? `${line.name} - ${line.qty}` : line.name,
-        item_type: isProduct ? "product" : isGiftBox ? "gift_box" : "custom",
-        quantity: line.count,
-        unit_price: line.price,
-        total_price: line.price * line.count,
-      };
+    rzp.on("payment.failed", (response) => {
+      setLoading(false);
+      toast.error(response.error?.description || "Payment failed. Please try another payment method.");
     });
-
-  const createCodOrderDirectly = async () => {
-    if (!auth.user) throw new Error("Not authenticated");
-
-    const { data: createdOrder, error: orderError } = await supabase
-      .from("orders")
-      .insert({
-        user_id: auth.user.id,
-        shipping_name: form.fullName,
-        shipping_phone: form.phone,
-        shipping_address_line1: form.address,
-        shipping_city: form.city,
-        shipping_state: form.state,
-        shipping_pincode: form.pincode,
-        subtotal: cart.subtotal,
-        shipping_cost: ship,
-        total_amount: total,
-        payment_method: "cod",
-        payment_status: "pending",
-        status: "confirmed",
-        confirmed_at: new Date().toISOString(),
-      })
-      .select("*")
-      .single();
-
-    if (orderError || !createdOrder) {
-      throw new Error(orderError?.message || "Order creation failed");
-    }
-
-    const { data: items, error: itemError } = await supabase
-      .from("order_items")
-      .insert(buildOrderItems().map((item) => ({ ...item, order_id: createdOrder.id })))
-      .select("*");
-
-    if (itemError) {
-      throw new Error(itemError.message || "Order items could not be saved");
-    }
-
-    return { ...createdOrder, items: items ?? [] };
+    rzp.open();
   };
 
   const createOrder = async (e: React.FormEvent) => {
@@ -220,15 +183,6 @@ function Checkout() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Not authenticated");
 
-      if (paymentMethod === "cod") {
-        const codOrder = await createCodOrderDirectly();
-        setOrder(codOrder);
-        cart.clear();
-        setDone(true);
-        toast.success("Order placed successfully! Admin can see it now.");
-        return;
-      }
-
       const { data: result, error } = await supabase.functions.invoke("create-order", {
         body: {
           cart_items: cart.lines.map((line) => ({
@@ -245,14 +199,20 @@ function Checkout() {
           shipping_city: form.city,
           shipping_state: form.state,
           shipping_pincode: form.pincode,
-          payment_method: "razorpay",
+          payment_method: paymentMethod,
         },
       });
 
       if (error) throw new Error(error.message || "Order creation failed");
       if (!result?.order) throw new Error("Order creation failed");
 
-      if (result.razorpay_order_id) {
+      if (paymentMethod === "cod") {
+        setOrder(result.order);
+        cart.clear();
+        setDone(true);
+        toast.success("Cash on Delivery order placed successfully!");
+        setLoading(false);
+      } else if (result.razorpay_order_id) {
         openRazorpayCheckout(
           result.razorpay_order_id,
           result.order.id,
@@ -280,7 +240,7 @@ function Checkout() {
           Order #{order?.order_number || `LG${Date.now().toString().slice(-6)}`} confirmed.
           {paymentMethod === "cod"
             ? " Pay cash on delivery."
-            : " We've emailed your invoice."}
+            : " Payment received successfully."}
         </p>
         <Button onClick={() => nav({ to: "/" })} className="mt-6 bg-brand text-brand-foreground">
           Back to Home
@@ -357,7 +317,11 @@ function Checkout() {
                 className="space-y-2"
               >
                 {[
-                  { v: "razorpay", l: "Card / UPI / NetBanking", i: CreditCard },
+                  {
+                    v: "razorpay",
+                    l: "UPI / Cards / NetBanking / Wallets / EMI / Pay Later",
+                    i: CreditCard,
+                  },
                   { v: "cod", l: "Cash on Delivery", i: Truck },
                 ].map((p) => (
                   <label
@@ -414,7 +378,11 @@ function Checkout() {
             </div>
             <Button
               type="submit"
-              disabled={cart.lines.length === 0 || loading}
+              disabled={
+                cart.lines.length === 0 ||
+                loading ||
+                (paymentMethod === "razorpay" && !checkoutReady)
+              }
               className="w-full mt-5 bg-gradient-hero text-white h-12 shadow-elegant"
             >
               {loading ? (

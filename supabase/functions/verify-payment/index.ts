@@ -12,7 +12,8 @@ async function verifyPayment(
   paymentId: string,
   signature: string
 ): Promise<boolean> {
-  const keySecret = Deno.env.get("RAZORPAY_KEY_SECRET");
+  const keySecret =
+    Deno.env.get("RAZORPAY_KEY_SECRET") ?? Deno.env.get("RAZORPAY_API_SECRET");
   if (!keySecret) return false;
 
   const encoder = new TextEncoder();

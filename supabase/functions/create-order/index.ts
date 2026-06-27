@@ -44,8 +44,9 @@ function getCodDeliveryCharge(city: string, state: string) {
 }
 
 async function createRazorpayOrder(amount: number, receipt: string): Promise<{ id: string } | null> {
-  const keyId = Deno.env.get("RAZORPAY_KEY_ID");
-  const keySecret = Deno.env.get("RAZORPAY_KEY_SECRET");
+  const keyId = Deno.env.get("RAZORPAY_KEY_ID") ?? Deno.env.get("RAZORPAY_API_KEY");
+  const keySecret =
+    Deno.env.get("RAZORPAY_KEY_SECRET") ?? Deno.env.get("RAZORPAY_API_SECRET");
 
   if (!keyId || !keySecret) {
     console.error("Razorpay credentials not configured");
@@ -64,8 +65,9 @@ async function createRazorpayOrder(amount: number, receipt: string): Promise<{ i
       body: JSON.stringify({
         amount: Math.round(amount * 100),
         currency: "INR",
-        receipt: receipt,
+        receipt: receipt.slice(0, 40),
         payment_capture: 1,
+        notes: { merchant_order_id: receipt },
       }),
     });
 
@@ -167,7 +169,8 @@ Deno.serve(async (req: Request) => {
     }
 
     if ((payment_method === "razorpay" || payment_method === "upi") &&
-      (!Deno.env.get("RAZORPAY_KEY_ID") || !Deno.env.get("RAZORPAY_KEY_SECRET"))) {
+      (!(Deno.env.get("RAZORPAY_KEY_ID") ?? Deno.env.get("RAZORPAY_API_KEY")) ||
+        !(Deno.env.get("RAZORPAY_KEY_SECRET") ?? Deno.env.get("RAZORPAY_API_SECRET")))) {
       return new Response(JSON.stringify({ error: "Razorpay is not configured. Add Razorpay keys to Supabase secrets." }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -343,7 +346,8 @@ Deno.serve(async (req: Request) => {
         return new Response(JSON.stringify({
           order,
           razorpay_order_id: razorpayOrder.id,
-          razorpay_key_id: Deno.env.get("RAZORPAY_KEY_ID"),
+          razorpay_key_id:
+            Deno.env.get("RAZORPAY_KEY_ID") ?? Deno.env.get("RAZORPAY_API_KEY"),
         }), {
           status: 201,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
