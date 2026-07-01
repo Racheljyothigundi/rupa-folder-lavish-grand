@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { Logo } from "./Logo";
-import { Phone, Mail, MapPin, Instagram, Facebook, Linkedin } from "lucide-react";
+import { Phone, Mail, MapPin, Instagram, Facebook } from "lucide-react";
 
 export function Footer() {
   return (
@@ -39,9 +39,24 @@ export function Footer() {
             <li className="flex items-center gap-2"><Mail className="w-4 h-4 text-brand-cyan" /> lavishgrandtraderspvtltd@gmail.com</li>
           </ul>
           <div className="flex gap-3 mt-4">
-            {[Instagram, Facebook, Linkedin].map((Icon, i) => (
-              <a key={i} href="#" className="w-9 h-9 rounded-full bg-white/10 hover:bg-brand-cyan hover:text-brand-deep flex items-center justify-center transition-colors"><Icon className="w-4 h-4"/></a>
-            ))}
+            <a
+              href="https://www.instagram.com/p/DZ9vpQjkah7/?utm_source=ig_web_button_share_sheet&igsh=MzRlODBiNWFlZA=="
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Visit Lavish Grand Traders on Instagram"
+              className="w-9 h-9 rounded-full bg-white/10 hover:bg-brand-cyan hover:text-brand-deep flex items-center justify-center transition-colors"
+            >
+              <Instagram className="w-4 h-4" />
+            </a>
+            <a
+              href="https://www.facebook.com/stories/122095400739379391/UzpfSVNDOjIwMTk3MjA5NjE5NzA0NzE=/?view_single=1"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Visit Lavish Grand Traders on Facebook"
+              className="w-9 h-9 rounded-full bg-white/10 hover:bg-brand-cyan hover:text-brand-deep flex items-center justify-center transition-colors"
+            >
+              <Facebook className="w-4 h-4" />
+            </a>
           </div>
         </div>
       </div>
