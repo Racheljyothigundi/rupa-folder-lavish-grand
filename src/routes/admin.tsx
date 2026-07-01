@@ -214,8 +214,8 @@ function Admin() {
     if (user?.role !== "admin") return;
 
     let cancelled = false;
-    async function loadOrders() {
-      setLoadingOrders(true);
+    async function loadOrders(showLoading = false) {
+      if (showLoading) setLoadingOrders(true);
       const { data, error } = await supabase
         .from("orders")
         .select("*, items:order_items(id, item_name, quantity, unit_price, total_price)")
@@ -228,16 +228,22 @@ function Admin() {
       } else {
         setOrders((data ?? []).map(normalizeAdminOrder));
       }
-      setLoadingOrders(false);
+      if (showLoading) setLoadingOrders(false);
     }
 
-    loadOrders();
+    void loadOrders(true);
 
     const channel = supabase
       .channel("admin-orders")
-      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => loadOrders())
+      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => {
+        void loadOrders();
+      })
       .subscribe();
-    const refresh = window.setInterval(loadOrders, 7000);
+    // Realtime handles normal updates. This slower, silent refresh is only a
+    // fallback in case the realtime connection is interrupted.
+    const refresh = window.setInterval(() => {
+      void loadOrders();
+    }, 60_000);
 
     return () => {
       cancelled = true;
